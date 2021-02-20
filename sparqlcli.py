@@ -13,6 +13,8 @@ except:
     from urllib.parse import urlparse
 
 import rdflib
+import SPARQLWrapper as sparqlw
+
 import rich
 import rich.syntax
 import rich.console
@@ -30,11 +32,13 @@ def is_url(t):
     except:
         return False
 
-def fprint(*pargs, **kwargs):
+def fprint(catarg, *pargs, **kwargs):
     if args is None or not args.interactive:
-        print(*pargs, **kwargs, file=sys.stderr)
+        if type(catarg) is str and catarg.startswith("\\[") and not args.interactive:
+            catarg = catarg[1:]
+        print(catarg, *pargs, **kwargs, file=sys.stderr)
     else:
-        rich.print(*pargs, **kwargs, file=sys.stderr)
+        rich.print(catarg, *pargs, **kwargs, file=sys.stderr)
 
 def vprint(*pargs, **kwargs):
     if args is None or args.verbose:
@@ -148,18 +152,41 @@ def load_local(args):
         sys.exit(1)
 
     fprint("\[parsing complete]")
-    return g, prompt
+    return g, g, prompt
 
 def init_remote(args):
+    g = rdflib.Graph()
+    add_namespace_params(g)
+
+    sparql_remote = sparqlw.SPARQLWrapper("http://dbpedia.org/sparql")
+    sparql_remote.setReturnFormat(sparqlw.JSON)
+
     prompt = urlparse(args.endpoint).netloc + "> "
 
-    # return g, prompt
-    raise Exception("remote endpoint support not implemented yet")
+    return sparql_remote, g, prompt
 
 if args.remote is None or args.remote == False:
-    g, prompt = load_local(args)
+    query_endpoint, g, prompt = load_local(args)
 else:
-    g, prompt = init_remote(args)
+    query_endpoint, g, prompt = init_remote(args)
+
+def sparqlw_to_string(g, val):
+    if val is None:
+        return ""
+    if type(val) is str:
+        return val
+    if val.get("type", "") == "uri":
+        res_uri = val.get("value", "")
+        for ns, nslong in g.namespace_manager.namespaces():
+            if res_uri.startswith(nslong):
+                res_uri = ns + ":" + res_uri[len(nslong):]
+        return res_uri
+    elif val.get("type", "") in ["literal", "typed-literal"]:
+        lit_val = val.get("value", "")
+        lit_val = rdflib.term.Literal(lit_val)
+        return str(lit_val.toPython())
+    else:
+        raise Exception(f"cannot decode value type {val.get('type', '')} in {str(val)}")
 
 def rdflib_to_string(g, val):
     if val is None:
@@ -168,7 +195,49 @@ def rdflib_to_string(g, val):
         return str(val.toPython())
     return val.n3(g.namespace_manager)
 
-def output_result(qres, query):
+# {'head': {'link': [], 'vars': ['a', 'b']}, 'results': {'distinct': False, 'ordered': True, 'bindings': [{'a': {'type': 'uri', 'value': 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type'}, 'b': {'type': 'uri', 'value': 'http://www.openlinksw.com/schemas/virtcxml#FacetCategoryPattern'}}, {'a': {'type': 'uri', 'value': 'http://www.w3.org/2001/XMLSchema#anyURI'}, 'b': {'type': 'uri', 'value': 'http://www.w3.org/2000/01/rdf-schema#Datatype'}}, {'a': {'type': 'uri', 'value': 'http://www.w3.org/2001/XMLSchema#anyURI'}, 'b': {'type': 'uri', 'value': 'http://www.w3.org/2000/01/rdf-schema#Datatype'}}, {'a': {'type': 'uri', 'value': 'http://www.w3.org/2001/XMLSchema#boolean'}, 'b': {'type': 'uri', 'value': 'http://www.w3.org/2000/01/rdf-schema#Datatype'}}, {'a': {'type': 'uri', 'value': 'http://www.w3.org/2001/XMLSchema#boolean'}, 'b': {'type': 'uri', 'value': 'http://www.w3.org/2000/01/rdf-schema#Datatype'}}, {'a': {'type': 'uri', 'value': 'http://www.w3.org/2001/XMLSchema#date'}, 'b': {'type': 'uri', 'value': 'http://www.w3.org/2000/01/rdf-schema#Datatype'}}, {'a': {'type': 'uri', 'value': 'http://www.w3.org/2001/XMLSchema#date'}, 'b': {'type': 'uri', 'value': 'http://www.w3.org/2000/01/rdf-schema#Datatype'}}, {'a': {'type': 'uri', 'value': 'http://www.w3.org/2001/XMLSchema#dateTime'}, 'b': {'type': 'uri', 'value': 'http://www.w3.org/2000/01/rdf-schema#Datatype'}}, {'a': {'type': 'uri', 'value': 'http://www.w3.org/2001/XMLSchema#dateTime'}, 'b': {'type': 'uri', 'value': 'http://www.w3.org/2000/01/rdf-schema#Datatype'}}, {'a': {'type': 'uri', 'value': 'http://www.w3.org/2001/XMLSchema#double'}, 'b': {'type': 'uri', 'value': 'http://www.w3.org/2000/01/rdf-schema#Datatype'}}]}}
+def output_remote_result(g, qres, query):
+    qres_count = len(qres.get("results", {}).get("bindings", []))
+    completer_options = set()
+
+    if args.output == "json" or args.output=="csv":
+        output_data = {'query': query}
+        output_data['bindings'] = qres.get("head", {}).get("vars", [])
+        output_data['results'] = []
+        for row in qres.get("results", {}).get("bindings", []):
+            rowvals = [sparqlw_to_string(g, row[column]) for column in output_data['bindings']]
+            rowdict = {}
+            for idx, val in enumerate(rowvals):
+                rowdict[output_data['bindings'][idx]] = val
+                if val is not None and str(val) != '':
+                    completer_options.add(str(val))
+            output_data['results'].append(rowdict)
+
+        if args.output == "json":
+            print(json.dumps(output_data, indent=2), file=sys.stdout)
+        else:
+            print("\t".join([f'"{var}"' for var in output_data['bindings']]), file=sys.stdout)
+            for row in output_data['results']:
+                print("\t".join([f'"{row[var]}"' for var in output_data['bindings']]), file=sys.stdout)
+    else:
+        table = rich.table.Table(title=f"{qres_count} result" + ("s" if qres_count > 1 else ""))
+
+        qres_vars = qres.get("head", {}).get("vars", [])
+        for var in qres_vars:
+            table.add_column(var, justify="left", no_wrap=False)
+
+        for row in qres.get("results", {}).get("bindings", []):
+            rowvals = [sparqlw_to_string(g, row[column]) for column in qres_vars]
+            for val in rowvals:
+                if val is not None and str(val) != '':
+                    completer_options.add(str(val))
+            table.add_row(*rowvals)
+
+        rich.print(table, file=sys.stdout)
+
+    return list(completer_options)
+
+def output_local_result(qres, query):
     completer_options = set()
 
     if args.output == "json" or args.output=="csv":
@@ -185,7 +254,7 @@ def output_result(qres, query):
             output_data['results'].append(rowdict)
 
         if args.output == "json":
-            print(json.dumps(output_data), file=sys.stdout)
+            print(json.dumps(output_data, indent=2), file=sys.stdout)
         else:
             print("\t".join([f'"{var}"' for var in output_data['bindings']]), file=sys.stdout)
             for row in output_data['results']:
@@ -227,10 +296,22 @@ def exec_query(query):
         return []
 
     fprint("\[querying]")
-    qres = g.query(query)
-    vprint(f"\[query complete] {len(qres)} results")
+    qres = None
+    if type(query_endpoint) is rdflib.Graph:
+        qres = query_endpoint.query(query)
+        vprint(f"\[query complete] {len(qres)} results")
+        return output_local_result(qres, query)
+    else:
+        sparql_prefixes = "\n".join([f"PREFIX {ns}: <{nslong}>" \
+                                    for ns, nslong in g.namespace_manager.namespaces()])
 
-    return output_result(qres, query)
+        full_sparql = sparql_prefixes + "\n" + query
+        query_endpoint.setQuery(full_sparql)
+        qres = query_endpoint.query()
+        qres = qres.convert()
+        qres_count = len(qres.get("results", {}).get("bindings", []))
+        vprint(f"\[query complete] {qres_count} results")
+        return output_remote_result(g, qres, query)
 
 class SparqlCompleter:
     def __init__(self):
@@ -374,7 +455,7 @@ def start_interactive_mode():
                         if result_completer_options is not None and len(result_completer_options) > 0:
                             completer.add_dynamic_options(result_completer_options)
                     except Exception as ex:
-                        rich.print(ex)
+                        fprint(f"[red]\[error][/red] {ex}")
                         if args.verbose:
                             if console is None:
                                 console = rich.console.Console()
