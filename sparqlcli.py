@@ -7,6 +7,7 @@ import readline
 import tempfile
 import subprocess
 import json
+import time
 try:
     from urlparse import urlparse
 except:
@@ -160,6 +161,7 @@ def init_remote(args):
 
     sparql_remote = sparqlw.SPARQLWrapper("http://dbpedia.org/sparql")
     sparql_remote.setReturnFormat(sparqlw.JSON)
+    # sparql_remote.setMethod(sparqlw.POST)
 
     prompt = urlparse(args.endpoint).netloc + "> "
 
@@ -384,6 +386,57 @@ def readline_init():
 
     return completer
 
+
+def load_query_from_file(query_from_file):
+    if query_from_file == "":
+        rich.print("[red]\[error][/red] syntax: .file <filename>")
+        in_query = None
+    elif not os.path.exists(query_from_file):
+        rich.print("[red]\[error][/red] file not found:", query_from_file)
+        in_query = None
+    else:
+        with open(query_from_file, "rt") as infile:
+            in_query = infile.read().strip()
+    return in_query
+
+def add_history(entry):
+    # remove duplicates
+    history_duplicates = []
+    history = set()
+    for history_index in range(readline.get_current_history_length()):
+        history_item = readline.get_history_item(history_index)
+        if history_item not in history and history != entry:
+            history.add(history_item)
+        else:
+            history_duplicates.append(history_index)
+    for duplicate_index in reversed(history_duplicates):
+        readline.remove_history_item(duplicate_index)
+
+    readline.add_history(entry)
+
+def run_query(in_query, skip_history, completer):
+    if in_query is None or type(in_query) is not str or in_query == "":
+        return False
+
+    query_output = rich.syntax.Syntax(in_query, "sparql")
+    rich.print()
+    rich.print(query_output)
+
+    if not skip_history:
+        add_history(in_query.replace("\n", " "))
+
+    try:
+        result_completer_options = exec_query(in_query)
+        if result_completer_options is not None and len(result_completer_options) > 0:
+            completer.add_dynamic_options(result_completer_options)
+    except Exception as ex:
+        fprint(f"[red]\[error][/red] {ex}")
+        if args.verbose:
+            if console is None:
+                console = rich.console.Console()
+            console.print_exception()
+    return True
+
 def start_interactive_mode():
     global console
 
@@ -397,19 +450,38 @@ def start_interactive_mode():
     completer = readline_init()
 
     cancelled = False
+    watched_file = None
+    watched_file_previous_content = None
 
     in_query = []
     while not cancelled:
         try:
-            line_prompt = prompt if len(in_query) == 0 else "...> "
-            rich.print(line_prompt, end='\n' if line_prompt == prompt else '')
+            if in_query is None:
+                in_query = []
             if type(in_query) is not list:
                 in_query = []
 
-            in_query.append(input())
+            if watched_file is None:
+                line_prompt = prompt if len(in_query) == 0 else "...> "
+                rich.print(line_prompt, end='\n' if line_prompt == prompt else '')
+
+                in_query.append(input())
+            else:
+                in_query = load_query_from_file(watched_file)
+                if watched_file_previous_content is None or \
+                    watched_file_previous_content != in_query:
+                    skip_history = True
+                    if in_query is None:
+                        continue
+                    run_query(in_query, skip_history, completer)
+                    watched_file_previous_content = in_query
+                    in_query = []
+
+                time.sleep(1)
+                continue
 
             if in_query[-1].strip().lower() in [".help", ".help;"]:
-                fprint("commands: .help, .exit, .edit")
+                fprint("commands: .help, .exit, .edit, .file, .watch")
                 in_query = []
                 continue
 
@@ -427,40 +499,28 @@ def start_interactive_mode():
                 if in_query.endswith(".edit"):
                     in_query = in_query[:-5].strip()
                     in_query = spawn_editor(in_query).strip()
+
+                if in_query.startswith(".watch "):
+                    add_history(in_query.replace("\n", " "))
+                    query_from_file = in_query[len(".watch "):].strip()
+                    in_query = load_query_from_file(query_from_file)
+                    skip_history = True
+                    if in_query is None:
+                        continue
+
+                    fprint(f"\[watch] starting {query_from_file}")
+                    watched_file = query_from_file
+                    continue
+
                 if in_query.startswith(".file"):
-                    readline.add_history(in_query.replace("\n", " "))
+                    add_history(in_query.replace("\n", " "))
                     query_from_file = in_query[len(".file"):].strip()
+                    in_query = load_query_from_file(query_from_file)
+                    skip_history = True
+                    if in_query is None:
+                        continue
 
-                    if query_from_file == "":
-                        rich.print("[red]\[error][/red] syntax: .file <filename>")
-                        in_query = ""
-                    elif not os.path.exists(query_from_file):
-                        rich.print("[red]\[error][/red] file not found:", query_from_file)
-                        in_query = ""
-                    else:
-                        with open(query_from_file, "rt") as infile:
-                            in_query = infile.read().strip()
-                            skip_history = True
-
-                if type(in_query) is str and in_query != "":
-                    query_output = rich.syntax.Syntax(in_query, "sparql")
-                    rich.print()
-                    rich.print(query_output)
-
-                    if not skip_history:
-                        readline.add_history(in_query.replace("\n", " "))
-
-                    try:
-                        result_completer_options = exec_query(in_query)
-                        if result_completer_options is not None and len(result_completer_options) > 0:
-                            completer.add_dynamic_options(result_completer_options)
-                    except Exception as ex:
-                        fprint(f"[red]\[error][/red] {ex}")
-                        if args.verbose:
-                            if console is None:
-                                console = rich.console.Console()
-                            console.print_exception()
-
+                run_query(in_query, skip_history, completer)
 
                 in_query = []
                 continue
@@ -468,12 +528,19 @@ def start_interactive_mode():
             fprint("[exit]")
             cancelled = True
         except KeyboardInterrupt:
+            if watched_file is not None:
+                fprint(f"\[watch] stopping {watched_file}")
+                watched_file = None
             continue
         finally:
             pass
 
-if query is not None:
-    exec_query(query)
-    sys.exit(0)
-else:
-    start_interactive_mode()
+def main():
+    if query is not None:
+        exec_query(query)
+        sys.exit(0)
+    else:
+        start_interactive_mode()
+
+if __name__ == "__main__":
+    main()
