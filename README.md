@@ -2,6 +2,14 @@
 
 SPARQL command-line client based on [rdflib](https://github.com/RDFLib/rdflib) and [SPARQLWrapper](https://github.com/RDFLib/sparqlwrapper).
 
+## install
+
+```
+python3 -m pip install --user git+https://github.com/FrankGrimm/sparqlcli/
+```
+
+Make sure `pip` is installed and `$HOME/.local/bin/` is in your `PATH`.
+
 ## usage
 
 `sparqlcli endpoint`
