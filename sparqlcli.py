@@ -327,7 +327,7 @@ class SparqlCompleter:
                         '.exit',
                         '.edit']
         self.dynamic_options = ['foo']
-        self.max_dynamic_option_count = 10
+        self.max_dynamic_option_count = 500
 
     def get_options(self):
         return self.options + \
