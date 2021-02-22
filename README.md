@@ -22,6 +22,7 @@ Where `endpoint` is either a remote SPARQL endpoint URI or a local filename.
 - `[-r,--remote]` Force treating `endpoint` as a remote SPARQL server.
 - `[-i,--interactive INTERACTIVE]` Boolean, normally auto-detected if a tty is present.
 - `[-o,--output]` output format, one of `table,json,csv`, defaults to table display.
+- non-standard prefixes can be registered via `--prefix=longform` as well, e.g. `--foaf=http://xmlns.com/foaf/0.1/`
 
 ## REPL
 
