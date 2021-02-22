@@ -26,7 +26,7 @@ Where `endpoint` is either a remote SPARQL endpoint URI or a local filename.
 
 ## REPL
 
-REPL commands are only available in interactive mode.
+The REPL features basic auto-complete on standard SPARQL keywords and previous results. In interactive mode, the following commands are available in addition to simple queries:
 
 - `.edit` open current query buffer in `$EDITOR` (defaults to `vim`)
 - `.file <filename>` load and execute query from `<filename>`
