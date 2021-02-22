@@ -2,6 +2,8 @@
 
 SPARQL command-line client based on [rdflib](https://github.com/RDFLib/rdflib) and [SPARQLWrapper](https://github.com/RDFLib/sparqlwrapper).
 
+![image](https://user-images.githubusercontent.com/321111/108711738-1828f600-7516-11eb-95f4-2d093a7976f1.png)
+
 ## install
 
 ```
