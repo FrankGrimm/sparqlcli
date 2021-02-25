@@ -285,7 +285,7 @@ def exec_query(query):
         if line.upper().startswith("PREFIX "):
             prefixdata = line.split(" ", 2)
             if len(prefixdata) == 3:
-                g.namespace_manager.bind(prefixdata[1], prefixdata[2].strip("<>"), override=True)
+                g.namespace_manager.bind(prefixdata[1].strip(":"), prefixdata[2].strip("<>"), override=True)
                 rich.print("\[prefix]", prefixdata[1])
             else:
                 rich.print("[red]\[error][/red] syntax: PREFIX prefix <iri>")
@@ -324,6 +324,7 @@ class SparqlCompleter:
                         'COUNT',
                         'VALUES',
                         '.help',
+                        '.prefixes',
                         '.exit',
                         '.edit']
         self.dynamic_options = ['foo']
@@ -423,7 +424,7 @@ def run_query(in_query, skip_history, completer):
     rich.print(query_output)
 
     if not skip_history:
-        add_history(in_query.replace("\n", " "))
+        add_history(in_query)
 
     try:
         result_completer_options = exec_query(in_query)
@@ -480,6 +481,15 @@ def start_interactive_mode():
                 time.sleep(1)
                 continue
 
+            if in_query[-1].strip().lower() in [".prefixes", ".prefixes;"]:
+                fprint("prefixes:")
+
+                sparql_prefixes = "\n".join([f"PREFIX {ns}: <{nslong}>" \
+                                    for ns, nslong in g.namespace_manager.namespaces()])
+                print(sparql_prefixes)
+                in_query = []
+                continue
+
             if in_query[-1].strip().lower() in [".help", ".help;"]:
                 fprint("commands: .help, .exit, .edit, .file, .watch")
                 in_query = []
@@ -501,7 +511,7 @@ def start_interactive_mode():
                     in_query = spawn_editor(in_query).strip()
 
                 if in_query.startswith(".watch "):
-                    add_history(in_query.replace("\n", " "))
+                    add_history(in_query)
                     query_from_file = in_query[len(".watch "):].strip()
                     in_query = load_query_from_file(query_from_file)
                     skip_history = True
@@ -513,7 +523,7 @@ def start_interactive_mode():
                     continue
 
                 if in_query.startswith(".file"):
-                    add_history(in_query.replace("\n", " "))
+                    add_history(in_query)
                     query_from_file = in_query[len(".file"):].strip()
                     in_query = load_query_from_file(query_from_file)
                     skip_history = True
