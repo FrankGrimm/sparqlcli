@@ -22,6 +22,7 @@ import rich.console
 import rich.traceback
 
 HIST_PATH = "~/.config/sparqlcli/sparqlcli.history"
+HIST_CRLF = "<<CRLF>>"
 
 args = None
 console = None
@@ -107,14 +108,14 @@ def parse_args():
         raise argparse.ArgumentTypeError(f"file not found: {args.endpoint}")
 
     if args.interactive is None:
-        args.interactive = sys.stdin.isatty()
+        args.interactive = hasattr(sys.stdin, 'isatty') and sys.stdin.isatty()
 
     return args, prefix_args
 
 try:
     args, prefix_args = parse_args()
 except (argparse.ArgumentError, argparse.ArgumentTypeError) as arg_ex:
-    fprint(f"[red]\[error][/red] {arg_ex}")
+    fprint("error", f"[red]\[error][/red] {arg_ex}")
     sys.exit(1)
 
 if not args.interactive:
@@ -135,13 +136,13 @@ def add_namespace_params(g):
 
 def load_local(args):
     filename = args.endpoint
-    fprint("\[file]", os.path.basename(filename))
+    fprint("file", os.path.basename(filename))
     prompt = os.path.basename(filename)[:20] + "> "
 
     g = rdflib.Graph()
     add_namespace_params(g)
 
-    fprint("\[parsing] format=" + ("auto-detect" if args.format is None else args.format))
+    fprint("parsing", "format=" + ("auto-detect" if args.format is None else args.format))
 
     try:
         if args.format is None:
@@ -149,10 +150,10 @@ def load_local(args):
         else:
             g.parse(filename, format=args.format)
     except Exception as err:
-        fprint(f"[red]\[error][/red] {err}")
+        fprint("error", f"{err}")
         sys.exit(1)
 
-    fprint("\[parsing complete]")
+    fprint("parsing", "complete")
     return g, g, prompt
 
 def init_remote(args):
@@ -301,7 +302,7 @@ def exec_query(query):
     qres = None
     if type(query_endpoint) is rdflib.Graph:
         qres = query_endpoint.query(query)
-        vprint(f"\[query complete] {len(qres)} results")
+        vprint(f"\[query complete]", f"{len(qres)} results")
         return output_local_result(qres, query)
     else:
         sparql_prefixes = "\n".join([f"PREFIX {ns}: <{nslong}>" \
@@ -312,7 +313,7 @@ def exec_query(query):
         qres = query_endpoint.query()
         qres = qres.convert()
         qres_count = len(qres.get("results", {}).get("bindings", []))
-        vprint(f"\[query complete] {qres_count} results")
+        vprint(f"\[query complete]", f"{qres_count} results")
         return output_remote_result(g, qres, query)
 
 class SparqlCompleter:
@@ -366,15 +367,40 @@ def readline_history_init():
         os.makedirs(os.path.dirname(hist_filename))
     try:
         readline.read_history_file(hist_filename)
+        #if args.verbose:
+        #    fprint("\[history]", "read", readline.get_history_length(), "items")
     except FileNotFoundError:
         with open(hist_filename, 'wb') as outfile:
             pass
 
+    readline_history_replace(HIST_CRLF, "\n")
+
+def readline_history_replace(text, replacement):
+    # print("readline_history_replace", json.dumps({"text": text, "replace": replacement}))
+    for history_index in range(readline.get_current_history_length()+1):
+        history_item = readline.get_history_item(history_index)
+        if history_item is None:
+            continue
+        # print("hist replace", history_index, history_item)
+        history_item = history_item.replace(text, replacement)
+        readline.replace_history_item(history_index - 1, history_item)
+        # print("hist replace", history_index, "after", readline.get_history_item(history_index))
+
+
+def readline_teardown():
+    # if args.verbose:
+    #     fprint("history", "writing", readline.get_history_length(), "items")
+
+    readline_history_replace("\n", HIST_CRLF)
+    readline.write_history_file(os.path.expanduser(HIST_PATH))
+    # if args.verbose:
+    #     fprint("history", "written", readline.get_history_length(), "items")
+
 def readline_init():
     # readline functionality w/ history
+    readline.set_auto_history(False) # manual history management
     readline_history_init()
     readline.set_history_length(1000)
-    readline.set_auto_history(False) # manual history management
 
     readline.set_completer_delims(readline.get_completer_delims().replace(":", ""))
 
@@ -383,8 +409,7 @@ def readline_init():
 
     readline.parse_and_bind('tab: menu-complete complete')
     readline.parse_and_bind('set editing-mode vi')
-    atexit.register(readline.write_history_file, os.path.expanduser(HIST_PATH))
-
+    atexit.register(readline_teardown)
     return completer
 
 
@@ -404,23 +429,27 @@ def add_history(entry):
     # remove duplicates
     history_duplicates = []
     history = set()
-    for history_index in range(readline.get_current_history_length()):
+    for history_index in range(readline.get_current_history_length()+1):
         history_item = readline.get_history_item(history_index)
+        if history_item is None:
+            continue
         if history_item not in history and history != entry:
             history.add(history_item)
         else:
-            history_duplicates.append(history_index)
+            # print("history duplicate", history_item)
+            history_duplicates.append(history_index - 1)
+
     for duplicate_index in reversed(history_duplicates):
         readline.remove_history_item(duplicate_index)
 
     readline.add_history(entry)
 
 def run_query(in_query, skip_history, completer):
+    global console
     if in_query is None or type(in_query) is not str or in_query == "":
         return False
 
     query_output = rich.syntax.Syntax(in_query, "sparql")
-    rich.print()
     rich.print(query_output)
 
     if not skip_history:
@@ -431,7 +460,7 @@ def run_query(in_query, skip_history, completer):
         if result_completer_options is not None and len(result_completer_options) > 0:
             completer.add_dynamic_options(result_completer_options)
     except Exception as ex:
-        fprint(f"[red]\[error][/red] {ex}")
+        fprint("\[error]", f"{ex}")
         if args.verbose:
             if console is None:
                 console = rich.console.Console()
@@ -441,8 +470,9 @@ def run_query(in_query, skip_history, completer):
 def start_interactive_mode():
     global console
 
-    vprint("\[interactive mode] starting")
-    vprint()
+    vprint("\[interactive mode]", "starting")
+    if args.verbose:
+        print("")
 
     # nice console output
     rich.pretty.install()
@@ -463,7 +493,7 @@ def start_interactive_mode():
                 in_query = []
 
             if watched_file is None:
-                line_prompt = prompt if len(in_query) == 0 else "...> "
+                line_prompt = prompt if len(in_query) == 0 else "… "
                 rich.print(line_prompt, end='\n' if line_prompt == prompt else '')
 
                 in_query.append(input())
@@ -486,7 +516,9 @@ def start_interactive_mode():
 
                 sparql_prefixes = "\n".join([f"PREFIX {ns}: <{nslong}>" \
                                     for ns, nslong in g.namespace_manager.namespaces()])
-                print(sparql_prefixes)
+                query_output = rich.syntax.Syntax(sparql_prefixes, "sparql")
+                rich.print(query_output)
+
                 in_query = []
                 continue
 
@@ -502,17 +534,25 @@ def start_interactive_mode():
             skip_history = False
             if in_query[-1].strip() == "" or ("\n".join(in_query)).strip().endswith(";"):
                 in_query = "\n".join(in_query)
+                interactive_stdout = hasattr(sys.stdout, 'isatty') and sys.stdout.isatty()
+
                 in_query = in_query.strip()
+                query_source_interactive = True
+                add_removal_lines = 0
 
                 if in_query.endswith(";"):
                     in_query = in_query.rstrip(";").strip()
+
                 if in_query.endswith(".edit"):
                     in_query = in_query[:-5].strip()
                     in_query = spawn_editor(in_query).strip()
+                    add_removal_lines += 1
 
                 if in_query.startswith(".watch "):
                     add_history(in_query)
-                    query_from_file = in_query[len(".watch "):].strip()
+                    query_from_file = in_query[len(".watch "):].strip(" \"'")
+                    query_from_file = os.path.expanduser(query_from_file)
+                    query_source_interactive = False
                     in_query = load_query_from_file(query_from_file)
                     skip_history = True
                     if in_query is None:
@@ -521,14 +561,20 @@ def start_interactive_mode():
                     fprint(f"\[watch] starting {query_from_file}")
                     watched_file = query_from_file
                     continue
-
-                if in_query.startswith(".file"):
+                elif in_query.startswith(".file"):
                     add_history(in_query)
-                    query_from_file = in_query[len(".file"):].strip()
+                    query_from_file = in_query[len(".file"):].strip(" \"'")
+                    query_from_file = os.path.expanduser(query_from_file)
+                    query_source_interactive = False
                     in_query = load_query_from_file(query_from_file)
                     skip_history = True
                     if in_query is None:
                         continue
+
+                if interactive_stdout and query_source_interactive:
+                    query_input_lines = in_query.count("\n") + 1 + add_removal_lines
+                    for remline in range(query_input_lines):
+                        sys.stdout.write("\033[F\033[K")
 
                 run_query(in_query, skip_history, completer)
 
