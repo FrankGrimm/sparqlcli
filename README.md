@@ -2,6 +2,8 @@
 
 SPARQL command-line client based on [rdflib](https://github.com/RDFLib/rdflib) and [SPARQLWrapper](https://github.com/RDFLib/sparqlwrapper).
 
+![image](https://user-images.githubusercontent.com/321111/108711738-1828f600-7516-11eb-95f4-2d093a7976f1.png)
+
 ## install
 
 ```
@@ -20,10 +22,11 @@ Where `endpoint` is either a remote SPARQL endpoint URI or a local filename.
 - `[-r,--remote]` Force treating `endpoint` as a remote SPARQL server.
 - `[-i,--interactive INTERACTIVE]` Boolean, normally auto-detected if a tty is present.
 - `[-o,--output]` output format, one of `table,json,csv`, defaults to table display.
+- non-standard prefixes can be registered via `--prefix=longform` as well, e.g. `--foaf=http://xmlns.com/foaf/0.1/`
 
 ## REPL
 
-REPL commands are only available in interactive mode.
+The REPL features basic auto-complete on standard SPARQL keywords and previous results. In interactive mode, the following commands are available in addition to simple queries:
 
 - `.edit` open current query buffer in `$EDITOR` (defaults to `vim`)
 - `.file <filename>` load and execute query from `<filename>`
