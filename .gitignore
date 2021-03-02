@@ -1,5 +1,6 @@
 testdata/*
 !testdata/.gitinclude
+!testdata/demo.nt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
